@@ -101,6 +101,20 @@ export default class ObsidianLinkEmbedPlugin extends Plugin {
 				},
 			});
 		});
+		this.addCommand({
+			id: 'embed-link-as-html',
+			name: 'Embed link as HTML',
+			editorCallback: async (editor: Editor) => {
+				let selected = await this.getText(editor);
+				if (!this.checkUrlValid(selected)) {
+					return;
+				}
+				await this.embedUrl(editor, selected, [
+					this.settings.primary,
+					this.settings.backup,
+				]);
+			},
+		});
 
 		this.registerMarkdownCodeBlockProcessor('embed', (source, el, ctx) => {
 			const info = parseYaml(source.trim()) as EmbedInfo;
@@ -201,7 +215,11 @@ export default class ObsidianLinkEmbedPlugin extends Plugin {
 					description: data.description.replace(/"/g, '\\"'),
 					url: data.url,
 				};
-				const embed = Mustache.render(template, escapedData) + '\n';
+				const embed =
+					HTMLTemplate.replace(/{{title}}/gm, escapedData.title)
+						.replace(/{{{image}}}/gm, escapedData.image)
+						.replace(/{{description}}/gm, escapedData.description)
+						.replace(/{{{url}}}/gm, escapedData.url) + '\n';
 				if (this.settings.delay > 0) {
 					await new Promise((f) =>
 						setTimeout(f, this.settings.delay),
