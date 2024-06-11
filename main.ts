@@ -101,6 +101,20 @@ export default class ObsidianLinkEmbedPlugin extends Plugin {
 				},
 			});
 		});
+		this.addCommand({
+			id: 'embed-link-as-html',
+			name: 'Embed link as HTML',
+			editorCallback: async (editor: Editor) => {
+				let selected = await this.getText(editor);
+				if (!this.checkUrlValid(selected)) {
+					return;
+				}
+				await this.embedUrlAsHtml(editor, selected, [
+					this.settings.primary,
+					this.settings.backup,
+				]);
+			},
+		});
 
 		this.registerMarkdownCodeBlockProcessor('embed', (source, el, ctx) => {
 			const info = parseYaml(source.trim()) as EmbedInfo;
@@ -201,7 +215,105 @@ export default class ObsidianLinkEmbedPlugin extends Plugin {
 					description: data.description.replace(/"/g, '\\"'),
 					url: data.url,
 				};
-				const embed = Mustache.render(template, escapedData) + '\n';
+				// const embed = Mustache.render(template, escapedData) + '\n';
+				const embed = HTMLTemplate.replace(
+					/{{title}}/gm,
+					escapedData.title,
+				)
+					.replace(/{{{image}}}/gm, escapedData.image)
+					.replace(/{{description}}/gm, escapedData.description)
+					.replace(/{{{url}}}/gm, escapedData.url);
+				if (this.settings.delay > 0) {
+					await new Promise((f) =>
+						setTimeout(f, this.settings.delay),
+					);
+				}
+				// before replacing, check whether dummy is deleted or modified
+				const dummy = editor.getRange(startCursor, endCursor);
+				if (dummy == dummyEmbed) {
+					editor.replaceRange(embed, startCursor, endCursor);
+				} else {
+					new Notice(
+						`Dummy preview has been deleted or modified. Replacing is cancelled.`,
+					);
+				}
+				break;
+			} catch (error) {
+				console.log('Link Embed: error', error);
+				idx += 1;
+				if (idx === selectedParsers.length) {
+					this.errorNotice();
+				}
+			}
+		}
+	}
+
+	async embedUrlAsHtml(
+		editor: Editor,
+		selected: Selected,
+		selectedParsers: string[],
+		inPlace: boolean = this.settings.inPlace,
+	) {
+		let url = selected.text;
+		// replace selection if in place
+		if (selected.can && inPlace) {
+			editor.replaceRange(
+				'',
+				selected.boundary.start,
+				selected.boundary.end,
+			);
+		}
+		// put a dummy preview here first
+		const cursor = editor.getCursor();
+		const lineText = editor.getLine(cursor.line);
+		let template = MarkdownTemplate;
+		let newLine = false;
+		if (lineText.length > 0) {
+			newLine = true;
+		}
+		if (newLine) {
+			editor.setCursor({ line: cursor.line + 1, ch: 0 });
+		} else {
+			editor.setCursor({ line: cursor.line, ch: lineText.length });
+		}
+		const startCursor = editor.getCursor();
+		const dummyEmbed =
+			Mustache.render(template, {
+				title: 'Fetching',
+				image: SPINNER,
+				description: `Fetching ${url}`,
+				url: url,
+			}) + '\n';
+		editor.replaceSelection(dummyEmbed);
+		const endCursor = editor.getCursor();
+		// if we can fetch result, we can replace the embed with true content
+		let idx = 0;
+		while (idx < selectedParsers.length) {
+			const selectedParser = selectedParsers[idx];
+			if (this.settings.debug) {
+				console.log('Link Embed: parser', selectedParser);
+			}
+			const parser = parsers[selectedParser];
+			parser.debug = this.settings.debug;
+			try {
+				const data = await parser.parse(url);
+				if (this.settings.debug) {
+					console.log('Link Embed: meta data', data);
+				}
+				const escapedData = {
+					title: data.title.replace(/"/g, '\\"'),
+					image: data.image,
+					description: data.description.replace(/"/g, '\\"'),
+					url: data.url,
+				};
+				// const embed = Mustache.render(template, escapedData) + '\n';
+				const embed = HTMLTemplate.replace(
+					/{{title}}/gm,
+					escapedData.title,
+				)
+					.replace(/{{{image}}}/gm, escapedData.image)
+					.replace(/{{description}}/gm, escapedData.description)
+					.replace(/{{{url}}}/gm, escapedData.url);
 				if (this.settings.delay > 0) {
 					await new Promise((f) =>
 						setTimeout(f, this.settings.delay),
